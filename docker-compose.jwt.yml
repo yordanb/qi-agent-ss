@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  api-jwt:
+    image: qi-agent-ss-jwt
+    container_name: qi-agent-ss-jwt
+    ports:
+      - "8002:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@172.18.0.5:5432/qi_db
+      - REDIS_URL=redis://172.18.0.6:6379/0
+      - JWT_SECRET_KEY=qi-agent-jwt-secret-key-2026
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=480
+      - REFRESH_TOKEN_EXPIRE_DAYS=7
+      - CORS_ORIGINS=["*"]
+    networks:
+      - backend-network
+
+networks:
+  backend-network:
+    external: true
