@@ -8,3 +8,8 @@ build/
 *.apk
 *.zip
 .9router/
+node_modules/
+rawData/
+import.js
+esic_import.js
+*.js
