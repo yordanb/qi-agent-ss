@@ -17,30 +17,71 @@ router = APIRouter(tags=["upload"])
 
 ALLOWED_DEPT = {"SPL2", "STYR"}
 
-# ── Lockout state ────────────────────────────────────────
-_lockout = {"fail_count": 0, "locked_until": None}
+# ── PIN via Database (shared across all instances) ───────
 
-# ── PIN state ────────────────────────────────────────────
-_current_pin = {"pin": "", "expires_at": None}
-
-def refresh_pin():
-    now = datetime.utcnow()
-    if _current_pin["expires_at"] and now < _current_pin["expires_at"] and _current_pin["pin"]:
-        return _current_pin["pin"]
+async def refresh_pin_db(db: AsyncSession):
+    """Generate new PIN and store in database."""
     pin = "".join(random.choices(string.digits, k=6))
-    _current_pin["pin"] = pin
-    _current_pin["expires_at"] = now + timedelta(seconds=60)
-    return pin
-
-def get_pin_info():
     now = datetime.utcnow()
-    if _current_pin["expires_at"] and now < _current_pin["expires_at"] and _current_pin["pin"]:
-        return _current_pin["pin"], max(int((_current_pin["expires_at"] - now).total_seconds()), 0)
-    return refresh_pin(), 120
+    expires_at = now + timedelta(seconds=120)
+    await db.execute(text("""
+        UPDATE tb_ss.pin_state
+        SET pin = :pin, expires_at = :expires_at, fail_count = 0, locked_until = NULL
+        WHERE id = 1
+    """), {"pin": pin, "expires_at": expires_at})
+    await db.commit()
+    return pin, 120
 
-def validate_pin(pin):
-    current, _ = get_pin_info()
-    return pin == current
+async def get_pin_info_db(db: AsyncSession):
+    """Return (pin, remaining_seconds) from database."""
+    result = await db.execute(text("SELECT pin, expires_at FROM tb_ss.pin_state WHERE id = 1"))
+    row = result.mappings().first()
+    now = datetime.utcnow()
+    if row and row["expires_at"] and now < row["expires_at"] and row["pin"]:
+        remaining = max(int((row["expires_at"] - now).total_seconds()), 0)
+        return row["pin"], remaining
+    # Expired or empty — generate new
+    return await refresh_pin_db(db)
+
+async def validate_pin_db(pin: str, db: AsyncSession):
+    """Verify PIN against database. Returns dict with valid/lockout/error."""
+    now = datetime.utcnow()
+
+    # Check lockout
+    result = await db.execute(text("SELECT fail_count, locked_until FROM tb_ss.pin_state WHERE id = 1"))
+    row = result.mappings().first()
+    if row and row["locked_until"] and now < row["locked_until"]:
+        remaining = int((row["locked_until"] - now).total_seconds())
+        return {"valid": False, "detail": "locked", "remaining": remaining}
+
+    # Reset lockout if expired
+    if row and row["locked_until"] and now >= row["locked_until"]:
+        await db.execute(text("UPDATE tb_ss.pin_state SET fail_count = 0, locked_until = NULL WHERE id = 1"))
+        await db.commit()
+
+    # Get current PIN
+    current_pin, _ = await get_pin_info_db(db)
+
+    if pin == current_pin:
+        # Success — reset fail count
+        await db.execute(text("UPDATE tb_ss.pin_state SET fail_count = 0, locked_until = NULL WHERE id = 1"))
+        await db.commit()
+        return {"valid": True}
+    else:
+        # Wrong — increment fail count
+        await db.execute(text("UPDATE tb_ss.pin_state SET fail_count = fail_count + 1 WHERE id = 1"))
+        await db.commit()
+
+        # Re-read updated fail_count
+        result = await db.execute(text("SELECT fail_count FROM tb_ss.pin_state WHERE id = 1"))
+        fc = result.scalar() or 0
+
+        if fc >= 3:
+            lockout_until = now + timedelta(minutes=1)
+            await db.execute(text("UPDATE tb_ss.pin_state SET locked_until = :lt WHERE id = 1"), {"lt": lockout_until})
+            await db.commit()
+            return {"valid": False, "detail": "locked", "remaining": 60}
+        return {"valid": False, "detail": "wrong", "attempts_left": 3 - fc}
 
 # ── Helpers ──────────────────────────────────────────────
 
@@ -442,36 +483,15 @@ async def upload_page():
 # ── API Endpoints ────────────────────────────────────────
 
 @router.get("/upload/pin")
-async def get_current_pin_api():
+async def get_current_pin_api(db: AsyncSession = Depends(get_db)):
     """App polls this to show current PIN."""
-    pin, remaining = get_pin_info()
+    pin, remaining = await get_pin_info_db(db)
     return {"pin": pin, "remaining_seconds": remaining}
 
 @router.get("/upload/verify-pin")
-async def verify_pin(pin: str):
+async def verify_pin(pin: str, db: AsyncSession = Depends(get_db)):
     """Verify PIN before allowing upload."""
-    now = datetime.utcnow()
-
-    # Check lockout
-    if _lockout["locked_until"] and now < _lockout["locked_until"]:
-        remaining = int((_lockout["locked_until"] - now).total_seconds())
-        return {"valid": False, "detail": "locked", "remaining": remaining}
-
-    # Reset lockout if expired
-    if _lockout["locked_until"] and now >= _lockout["locked_until"]:
-        _lockout["fail_count"] = 0
-        _lockout["locked_until"] = None
-
-    if validate_pin(pin):
-        _lockout["fail_count"] = 0
-        _lockout["locked_until"] = None
-        return {"valid": True}
-    else:
-        _lockout["fail_count"] += 1
-        if _lockout["fail_count"] >= 3:
-            _lockout["locked_until"] = now + timedelta(minutes=1)
-            return {"valid": False, "detail": "locked", "remaining": 60}
-        return {"valid": False, "detail": "wrong", "attempts_left": 3 - _lockout["fail_count"]}
+    return await validate_pin_db(pin, db)
 
 @router.post("/upload/import")
 async def upload_and_import(
@@ -485,7 +505,8 @@ async def upload_and_import(
     if _lockout["locked_until"] and now < _lockout["locked_until"]:
         remaining = int((_lockout["locked_until"] - now).total_seconds())
         raise HTTPException(423, detail=f"Terlalu banyak percobaan. Coba lagi dalam {remaining}s")
-    if not validate_pin(pin):
+    result = await validate_pin_db(pin, db)
+    if not result["valid"]:
         raise HTTPException(401, detail="PIN salah atau expired")
 
     if not file.filename.endswith((".xlsx", ".xls")):
