@@ -13,6 +13,7 @@ class SsResponse(BaseModel):
     current_status: Optional[str] = None
     source: Optional[str] = None
     reward_ss: Optional[float] = None
+    grade_ss: Optional[str] = None
     created_at: Optional[str] = None
 
 

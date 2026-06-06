@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, extract
+from sqlalchemy import select, func, and_, extract, text
 from typing import Optional
 from datetime import datetime
 
@@ -101,37 +101,50 @@ async def get_ss_by_nrp(
     status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(SsRecord).where(SsRecord.nrp == nrp)
+    # Count
+    count_sql = text("SELECT COUNT(*) FROM tb_ss.ss_records WHERE nrp = :nrp")
     if status:
-        query = query.where(SsRecord.current_status.ilike(f"%{status}%"))
-
-    count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+        count_sql = text("SELECT COUNT(*) FROM tb_ss.ss_records WHERE nrp = :nrp AND current_status ILIKE :status")
+    count_params = {"nrp": nrp, "status": f"%{status}%"}
+    count_result = await db.execute(count_sql, count_params)
     total = count_result.scalar()
 
-    query = query.order_by(SsRecord.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    records = result.scalars().all()
+    # Fetch ordered by tanggal_laporan DESC
+    fetch_sql = text("""
+        SELECT * FROM tb_ss.ss_records
+        WHERE nrp = :nrp
+        """ + ("AND current_status ILIKE :status" if status else "") + """
+        ORDER BY tanggal_laporan DESC NULLS LAST, created_at DESC NULLS LAST
+        LIMIT :limit OFFSET :offset
+    """)
+    fetch_params = {"nrp": nrp, "status": f"%{status}%", "limit": page_size, "offset": (page - 1) * page_size}
+    result = await db.execute(fetch_sql, fetch_params)
+    records = result.mappings().all()
 
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "data": [_ss_to_dict(r) for r in records],
+        "data": [_ss_to_dict(dict(r)) for r in records],
     }
 
 
-def _ss_to_dict(r: SsRecord) -> dict:
+def _ss_to_dict(r) -> dict:
+    def val(k, default=None):
+        v = r.get(k, default)
+        return v if v is not None else default
     return {
-        "no_ss": r.no_ss,
-        "judul": r.judul,
-        "nrp": r.nrp,
-        "nama": r.nama or None,
-        "dept": r.dept,
-        "tanggal_laporan": r.tanggal_laporan.isoformat() if r.tanggal_laporan else None,
-        "current_status": r.current_status,
-        "source": r.source,
-        "reward_ss": float(r.reward_ss) if r.reward_ss else None,
-        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "no_ss": val("no_ss", ""),
+        "judul": val("judul", ""),
+        "nrp": val("nrp", ""),
+        "nama": val("nama") or None,
+        "dept": val("dept"),
+        "tanggal_laporan": val("tanggal_laporan").isoformat() if val("tanggal_laporan") else None,
+        "current_status": val("current_status"),
+        "source": val("source"),
+        "reward_ss": float(val("reward_ss")) if val("reward_ss") else None,
+        "grade_ss": val("grade_ss") or None,
+        "created_at": val("created_at").isoformat() if val("created_at") else None,
     }
 
 
