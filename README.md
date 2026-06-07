@@ -13,15 +13,54 @@ Backend API for the QI Agent Flutter app. JWT-based authentication, PostgreSQL d
 | Server | Uvicorn |
 | Container | Docker |
 
-## Auth
+## Architecture
 
-All protected endpoints require `Authorization: Bearer <token>` header.
+Modular structure following MTE pattern:
+
+```
+app/
+├── api/
+│   └── v1/
+│       └── router.py          # Aggregator (auth, ss, esic, manpower, upload)
+├── modules/
+│   ├── auth/
+│   │   └── router.py          # Thin router → auth_service
+│   ├── ss/
+│   │   └── router.py          # Thin router → ss_service
+│   ├── esic/                  # ESIC endpoints
+│   ├── manpower/              # Manpower endpoints
+│   └── upload/                # Upload + PIN endpoints
+├── services/
+│   ├── auth_service.py        # Auth business logic
+│   └── ss_service.py          # SS business logic
+├── repositories/
+│   ├── user_repo.py           # User DB operations
+│   └── ss_repo.py             # SS + import_log DB operations
+├── core/
+│   ├── config.py              # Pydantic settings
+│   ├── database.py            # Async engine + session
+│   └── security.py            # JWT + bcrypt utilities
+├── models.py                  # SQLAlchemy models
+└── main.py                    # App factory + middleware
+```
+
+**Pattern:**
+- **Router** → thin layer, hanya handle request/response
+- **Service** → business logic
+- **Repository** → database operations
+
+## API v1 Endpoints
+
+Base URL: `https://qi.mibt.my.id/api/v1`
+
+### Auth
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/auth/login` | POST | Login → returns `access_token`, `refresh_token` |
-| `/api/auth/refresh` | POST | Refresh expired token |
-| `/api/auth/change-password` | POST | Change password (requires old password) |
+| `/api/v1/auth/login` | POST | Login → returns `access_token`, `refresh_token` |
+| `/api/v1/auth/refresh` | POST | Refresh expired token |
+| `/api/v1/auth/change-password` | POST | Change password (requires old password) |
+| `/api/v1/auth/admin/reset-password` | POST | Admin reset user password |
 
 **Login payload:**
 ```json
@@ -35,22 +74,20 @@ All protected endpoints require `Authorization: Bearer <token>` header.
   "refresh_token": "eyJ...",
   "token_type": "bearer",
   "nrp": "61122292",
-  "nama": "YORDAN BANIARA",
+  "nama": "Yordan Baniara",
   "is_admin": true
 }
 ```
 
----
-
-## SS (Sistem Saran)
+### SS (Sistem Saran)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/ss/stats/{nrp}` | GET | Dashboard stats for user (total_ss, wait_approval, dept) |
-| `/api/ss/stats/{nrp}/monthly` | GET | Monthly SS breakdown (year+month params) |
-| `/api/ss/by-nrp/{nrp}` | GET | SS records list (paginated: `page`, `page_size`) |
-| `/api/ss/dept/stats/{dept}` | GET | Dept-wide stats (year+month) |
-| `/api/ss/dept/daily/{dept}` | GET | Daily SS count for dept chart (year+month) |
+| `/api/v1/ss/stats/{nrp}` | GET | Dashboard stats (total, closed, outstanding, wait_approval) |
+| `/api/v1/ss/stats/{nrp}/monthly` | GET | Monthly breakdown (year, month query params) |
+| `/api/v1/ss/by-nrp/{nrp}` | GET | SS records list (paginated: `page`, `page_size`) |
+| `/api/v1/ss/dept/stats/{dept}` | GET | Dept-wide stats (year, month) |
+| `/api/v1/ss/dept/daily/{dept}` | GET | Daily SS count for chart (year, month) |
 
 **SS List Response:**
 ```json
@@ -60,7 +97,7 @@ All protected endpoints require `Authorization: Bearer <token>` header.
       "no_ss": "SS-2026-001",
       "judul": "...",
       "nrp": "61122292",
-      "nama": "YORDAN BANIARA",
+      "nama": "Yordan Baniara",
       "dept": "SPL2",
       "tanggal_laporan": "2026-05-15",
       "current_status": "approved",
@@ -74,48 +111,60 @@ All protected endpoints require `Authorization: Bearer <token>` header.
 }
 ```
 
+**Stats Response:**
+```json
+{
+  "nrp": "61122292",
+  "nama": "Yordan Baniara",
+  "dept": "SPL2",
+  "total_ss": 3,
+  "closed": 2,
+  "outstanding": 0,
+  "wait_approval": 0,
+  "other": 1,
+  "last_update": "2026-06-07T11:16:31.570+08:00"
+}
+```
+
 **Timestamp format:** UTC stored in DB (`timestamptz`), API response auto-converted to WITA (`+08:00`).
 
----
-
-## ESIC TM
+### ESIC TM
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/esic/` | GET | All ESIC snapshots (paginated) |
-| `/api/esic/by-nrp/{nrp}` | GET | ESIC snapshots for user |
+| `/api/v1/esic/` | GET | All ESIC snapshots (paginated) |
+| `/api/v1/esic/by-nrp/{nrp}` | GET | ESIC snapshots for user |
 
----
-
-## Manpower
+### Manpower
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/manpower` | GET | List manpower (paginated, filter by `section`, `crew`) |
-| `/api/manpower/single` | POST | Create one record |
-| `/api/manpower/{id}` | PUT | Update record |
-| `/api/manpower/{id}` | DELETE | Delete record |
-| `/api/manpower/coverage/summary` | GET | Coverage per crew (year+month) — sorted by % DESC |
-| `/api/manpower/coverage/section` | GET | Coverage per crew in section |
-| `/api/manpower/coverage/nrp/{nrp}` | GET | Individual coverage |
+| `/api/v1/manpower` | GET | List manpower (paginated, filter by `section`, `crew`) |
+| `/api/v1/manpower/single` | POST | Create one record |
+| `/api/v1/manpower/{id}` | PUT | Update record |
+| `/api/v1/manpower/{id}` | DELETE | Delete record |
+| `/api/v1/manpower/coverage/summary` | GET | Coverage per crew (year+month) |
+| `/api/v1/manpower/coverage/section` | GET | Coverage per crew in section |
+| `/api/v1/manpower/coverage/nrp/{nrp}` | GET | Individual coverage |
 
----
-
-## Upload / PIN
+### Upload / PIN
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/upload/pin` | GET | Generate 6-digit PIN, valid 120 seconds (no auth required) |
-| `/api/upload/verify-pin` | GET | Verify PIN — `?pin=123456` (no auth required) |
-| `/api/upload/import` | POST | Upload Excel + import (requires JWT + valid PIN) |
+| `/api/v1/upload/pin` | GET | Generate 6-digit PIN, valid 120 seconds (no auth) |
+| `/api/v1/upload/verify-pin` | GET | Verify PIN — `?pin=123456` (no auth) |
+| `/api/v1/upload/import` | POST | Upload Excel + import (requires JWT + valid PIN) |
 
 **PIN flow:**
-1. Call `GET /api/upload/pin` → get 6-digit PIN + `remaining_seconds`
-2. Show PIN to user in Flutter app
-3. Call `GET /api/upload/verify-pin?pin=xxxxxx` → `{valid: true/false}`
-4. On success, allow upload via `POST /api/upload/import`
+1. `GET /api/v1/upload/pin` → get 6-digit PIN + `remaining_seconds`
+2. `GET /api/v1/upload/verify-pin?pin=xxxxxx` → `{valid: true/false}`
+3. On success, allow upload via `POST /api/v1/upload/import`
 
----
+### Health Check
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check — returns `{"status": "ok", "version": "4.1.0"}` |
 
 ## Database Schema
 
@@ -123,21 +172,33 @@ PostgreSQL database: `db_qi_agent`, host timezone: `Asia/Makassar`
 
 | Schema | Tables |
 |--------|--------|
-| `tb_ss` | `users`, `ss_records`, `import_log`, `manpower`, `pin_state` |
+| `tb_ss` | `users`, `ss_records`, `import_log`, `manpower`, `pin_state`, `refresh_tokens` |
 | `tb_esic` | `esic_tm` |
 
 **Key tables:**
-- `tb_ss.users` — NRP, password_hash, is_admin
-- `tb_ss.ss_records` — SS submissions with status/grade (`timestamptz` for timestamps)
-- `tb_ss.manpower` — staff roster (NRP, crew, target SS)
-- `tb_ss.pin_state` — PIN storage (shared across all uvicorn workers)
+- `tb_ss.users` — NRP, password_hash, is_admin (login accounts)
+- `tb_ss.ss_records` — SS submissions with status/grade (`timestamptz`)
+- `tb_ss.manpower` — Employee data (NRP, nama, section, crew)
+- `tb_ss.pin_state` — PIN storage (shared across uvicorn workers)
+- `tb_ss.refresh_tokens` — JWT refresh tokens
 - `tb_esic.esic_tm` — ESIC snapshots with document metrics
 
----
+**Relations:**
+- `users` = login accounts (subset of manpower NRP)
+- `manpower` = employee master data
+- `ss_records.nrp` → references manpower (no FK, data-driven)
+- `refresh_tokens.nrp` → `users.nrp` (FK, cascade delete)
+
+## Auth Flow
+
+1. **Login**: `POST /api/v1/auth/login` with `{nrp, password}`
+2. **Auto-create**: If NRP exists in `manpower` but not in `users`, auto-create account with default password `12345`
+3. **Token**: Include `Authorization: Bearer <access_token>` in all protected endpoints
+4. **Refresh**: `POST /api/v1/auth/refresh` with `{refresh_token}`
 
 ## Deployment
 
-### Using docker-compose (recommended)
+### Using docker-compose
 
 ```bash
 cd qi-agent-ss
@@ -166,6 +227,40 @@ docker run -d \
   --restart unless-stopped \
   qi-agent-ss-jwt:latest
 ```
+
+## Migrations (Alembic)
+
+```bash
+# Generate migration
+alembic revision --autogenerate -m "description"
+
+# Apply migrations
+alembic upgrade head
+
+# Stamp current state
+alembic stamp head
+```
+
+## Logging
+
+Structured log format:
+```
+2026-06-07 21:30:00 | INFO | qi-agent | POST /api/v1/auth/login → 200 (45ms)
+2026-06-07 21:30:01 | ERROR | qi-agent | GET /api/v1/ss/stats/xxx → ERROR: ... (12ms)
+```
+
+## CORS
+
+Restricted to `https://qi.mibt.my.id` (no wildcard).
+
+## Security
+
+- JWT authentication on all protected endpoints
+- Bcrypt password hashing
+- PIN mechanism for upload approval (DB-backed, multi-worker safe)
+- Rate limiting via Cloudflare
+- HTTPS via Cloudflare tunnel
+- Input validation (year: 2020-2030, month: 1-12, page ≥ 1, page_size: 1-200)
 
 ---
 
