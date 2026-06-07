@@ -24,8 +24,7 @@ async def get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int 
     return {
         "total_ss": total,
         "closed": closed,
-        "outstanding": max(0, outstanding),
-        "wait_approval": wait_approval,
+        "open": max(0, outstanding + wait_approval),
         "other": max(0, other),
     }
 
@@ -75,8 +74,7 @@ async def get_dept_stats(db: AsyncSession, dept: str, year: int = None, month: i
         "dept": dept,
         "total_ss": total,
         "closed": closed,
-        "outstanding": max(0, outstanding),
-        "wait_approval": wait_approval,
+        "open": max(0, outstanding + wait_approval),
         "other": max(0, other),
     }
 
