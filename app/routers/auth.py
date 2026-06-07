@@ -44,13 +44,13 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     user = res.mappings().first()
 
     if not user:
-        # Auto-create user if NRP exists in SS data
-        ss_res = await db.execute(
-            text("SELECT nrp, nama FROM tb_ss.ss_records WHERE nrp = :nrp LIMIT 1"),
+        # Auto-create user if NRP exists in manpower
+        mp_res = await db.execute(
+            text("SELECT nrp, nama FROM tb_ss.manpower WHERE nrp = :nrp LIMIT 1"),
             {"nrp": req.nrp},
         )
-        ss_user = ss_res.mappings().first()
-        if not ss_user:
+        mp_user = mp_res.mappings().first()
+        if not mp_user:
             raise HTTPException(status_code=404, detail="NRP tidak ditemukan")
 
         default_hash = get_password_hash("12345")
@@ -63,7 +63,7 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
         if not verify_password(req.password, default_hash):
             raise HTTPException(status_code=401, detail="Password salah. Default password: 12345")
 
-        nama = ss_user["nama"] or req.nrp
+        nama = mp_user["nama"] or req.nrp
         access_token = create_access_token({"sub": req.nrp, "is_admin": False})
         refresh_token = create_refresh_token({"sub": req.nrp})
         return LoginResponse(
@@ -78,13 +78,13 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     if not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Password salah")
 
-    # Get nama from SS data
-    ss_res = await db.execute(
-        text("SELECT nama FROM tb_ss.ss_records WHERE nrp = :nrp LIMIT 1"),
+    # Get nama from manpower
+    mp_res = await db.execute(
+        text("SELECT nama FROM tb_ss.manpower WHERE nrp = :nrp LIMIT 1"),
         {"nrp": req.nrp},
     )
-    ss_user = ss_res.mappings().first()
-    nama = ss_user["nama"] if ss_user else req.nrp
+    mp_user = mp_res.mappings().first()
+    nama = mp_user["nama"] if mp_user else req.nrp
     is_admin = user["is_admin"] or False
 
     access_token = create_access_token({"sub": req.nrp, "is_admin": is_admin})
