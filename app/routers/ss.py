@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models import SsRecord, EsicTm, Manpower
+from app.models import SsRecord, EsicTm, Manpower, ImportLog
 
 router = APIRouter()
 
@@ -31,6 +31,10 @@ async def _get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int
     result = await db.execute(query)
     records = result.scalars().all()
 
+    # Get last imported_at from import_log
+    imp_res = await db.execute(select(func.max(ImportLog.imported_at)))
+    last_imported_at = imp_res.scalar()
+
     total = len(records)
     closed = sum(1 for r in records if r.current_status and r.current_status.lower() in ("approved", "closed"))
     outstanding = sum(1 for r in records if r.current_status and "outstanding" in r.current_status.lower())
@@ -43,7 +47,7 @@ async def _get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int
         "outstanding": max(0, outstanding),
         "wait_approval": wait_approval,
         "other": max(0, other),
-        "last_update": _to_wita(datetime.now(timezone.utc)),
+        "last_update": _to_wita(last_imported_at),
     }
 
 
