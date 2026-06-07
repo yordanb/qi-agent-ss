@@ -3,7 +3,7 @@
 import io
 import random
 import string
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, File, UploadFile, HTTPException, Form
 from fastapi.responses import HTMLResponse
@@ -11,75 +11,96 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
-from app.core.database import get_db
+from app.core.database import engine, get_db
 
 router = APIRouter(tags=["upload"])
 
 ALLOWED_DEPT = {"SPL2", "STYR"}
 
-# ── PIN via Database (shared across all instances) ───────
+# ── PIN via Database (independent engine.begin() — no DI session) ───────
 
-async def refresh_pin_db(db: AsyncSession):
-    """Generate new PIN and store in database."""
+async def refresh_pin_db(db=None):
+    """Generate new PIN and store in database via raw connection."""
     pin = "".join(random.choices(string.digits, k=6))
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expires_at = now + timedelta(seconds=120)
-    await db.execute(text("""
-        UPDATE tb_ss.pin_state
-        SET pin = :pin, expires_at = :expires_at, fail_count = 0, locked_until = NULL
-        WHERE id = 1
-    """), {"pin": pin, "expires_at": expires_at})
-    await db.commit()
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            UPDATE tb_ss.pin_state
+            SET pin = :pin, expires_at = :expires_at, fail_count = 0, locked_until = NULL
+            WHERE id = 1
+        """), {"pin": pin, "expires_at": expires_at})
     return pin, 120
 
-async def get_pin_info_db(db: AsyncSession):
-    """Return (pin, remaining_seconds) from database."""
-    result = await db.execute(text("SELECT pin, expires_at FROM tb_ss.pin_state WHERE id = 1"))
-    row = result.mappings().first()
-    now = datetime.utcnow()
-    if row and row["expires_at"] and now < row["expires_at"] and row["pin"]:
-        remaining = max(int((row["expires_at"] - now).total_seconds()), 0)
-        return row["pin"], remaining
+async def get_pin_info_db(db=None):
+    """Return (pin, remaining_seconds) from database via raw connection."""
+    async with engine.begin() as conn:
+        result = await conn.execute(text("SELECT pin, expires_at FROM tb_ss.pin_state WHERE id = 1"))
+        row = result.mappings().first()
+    now = datetime.now(timezone.utc)
+    if row and row["expires_at"] and row["pin"]:
+        expires = row["expires_at"]
+        if not expires.tzinfo:
+            expires = expires.replace(tzinfo=timezone.utc)
+        if now < expires:
+            remaining = max(int((expires - now).total_seconds()), 0)
+            return row["pin"], remaining
     # Expired or empty — generate new
-    return await refresh_pin_db(db)
+    return await refresh_pin_db()
 
-async def validate_pin_db(pin: str, db: AsyncSession):
-    """Verify PIN against database. Returns dict with valid/lockout/error."""
-    now = datetime.utcnow()
+async def validate_pin_db(pin: str, db=None):
+    """Verify PIN against database via raw connection."""
+    now = datetime.now(timezone.utc)
 
     # Check lockout
-    result = await db.execute(text("SELECT fail_count, locked_until FROM tb_ss.pin_state WHERE id = 1"))
-    row = result.mappings().first()
-    if row and row["locked_until"] and now < row["locked_until"]:
-        remaining = int((row["locked_until"] - now).total_seconds())
-        return {"valid": False, "detail": "locked", "remaining": remaining}
+    async with engine.begin() as conn:
+        result = await conn.execute(text("SELECT fail_count, locked_until FROM tb_ss.pin_state WHERE id = 1"))
+        row = result.mappings().first()
+    if row and row["locked_until"]:
+        lockout_until = row["locked_until"]
+        if not lockout_until.tzinfo:
+            lockout_until = lockout_until.replace(tzinfo=timezone.utc)
+        if now < lockout_until:
+            remaining = int((lockout_until - now).total_seconds())
+            return {"valid": False, "detail": "locked", "remaining": remaining}
+        # Lockout expired — reset
+        async with engine.begin() as conn:
+            await conn.execute(text("UPDATE tb_ss.pin_state SET fail_count = 0, locked_until = NULL WHERE id = 1"))
 
-    # Reset lockout if expired
-    if row and row["locked_until"] and now >= row["locked_until"]:
-        await db.execute(text("UPDATE tb_ss.pin_state SET fail_count = 0, locked_until = NULL WHERE id = 1"))
-        await db.commit()
+    # Read PIN directly from DB
+    async with engine.begin() as conn:
+        result = await conn.execute(text("SELECT pin, expires_at FROM tb_ss.pin_state WHERE id = 1"))
+        pin_row = result.mappings().first()
+    if not pin_row or not pin_row["pin"] or not pin_row["expires_at"]:
+        return {"valid": False, "detail": "wrong", "attempts_left": 3}
 
-    # Get current PIN
-    current_pin, _ = await get_pin_info_db(db)
+    expires = pin_row["expires_at"]
+    if not expires.tzinfo:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if now >= expires:
+        return {"valid": False, "detail": "wrong", "attempts_left": 3}
+
+    current_pin = pin_row["pin"]
 
     if pin == current_pin:
         # Success — reset fail count
-        await db.execute(text("UPDATE tb_ss.pin_state SET fail_count = 0, locked_until = NULL WHERE id = 1"))
-        await db.commit()
+        async with engine.begin() as conn:
+            await conn.execute(text("UPDATE tb_ss.pin_state SET fail_count = 0, locked_until = NULL WHERE id = 1"))
         return {"valid": True}
     else:
         # Wrong — increment fail count
-        await db.execute(text("UPDATE tb_ss.pin_state SET fail_count = fail_count + 1 WHERE id = 1"))
-        await db.commit()
+        async with engine.begin() as conn:
+            await conn.execute(text("UPDATE tb_ss.pin_state SET fail_count = fail_count + 1 WHERE id = 1"))
 
         # Re-read updated fail_count
-        result = await db.execute(text("SELECT fail_count FROM tb_ss.pin_state WHERE id = 1"))
-        fc = result.scalar() or 0
+        async with engine.begin() as conn:
+            result = await conn.execute(text("SELECT fail_count FROM tb_ss.pin_state WHERE id = 1"))
+            fc = result.scalar() or 0
 
         if fc >= 3:
             lockout_until = now + timedelta(minutes=1)
-            await db.execute(text("UPDATE tb_ss.pin_state SET locked_until = :lt WHERE id = 1"), {"lt": lockout_until})
-            await db.commit()
+            async with engine.begin() as conn:
+                await conn.execute(text("UPDATE tb_ss.pin_state SET locked_until = :lt WHERE id = 1"), {"lt": lockout_until})
             return {"valid": False, "detail": "locked", "remaining": 60}
         return {"valid": False, "detail": "wrong", "attempts_left": 3 - fc}
 
@@ -483,15 +504,15 @@ async def upload_page():
 # ── API Endpoints ────────────────────────────────────────
 
 @router.get("/upload/pin")
-async def get_current_pin_api(db: AsyncSession = Depends(get_db)):
+async def get_current_pin_api():
     """App polls this to show current PIN."""
-    pin, remaining = await get_pin_info_db(db)
+    pin, remaining = await get_pin_info_db()
     return {"pin": pin, "remaining_seconds": remaining}
 
 @router.get("/upload/verify-pin")
-async def verify_pin(pin: str, db: AsyncSession = Depends(get_db)):
+async def verify_pin(pin: str):
     """Verify PIN before allowing upload."""
-    return await validate_pin_db(pin, db)
+    return await validate_pin_db(pin)
 
 @router.post("/upload/import")
 async def upload_and_import(
@@ -501,12 +522,10 @@ async def upload_and_import(
     db: AsyncSession = Depends(get_db),
 ):
     """Upload file + import langsung setelah PIN verified."""
-    now = datetime.utcnow()
-    if _lockout["locked_until"] and now < _lockout["locked_until"]:
-        remaining = int((_lockout["locked_until"] - now).total_seconds())
-        raise HTTPException(423, detail=f"Terlalu banyak percobaan. Coba lagi dalam {remaining}s")
-    result = await validate_pin_db(pin, db)
+    result = await validate_pin_db(pin)
     if not result["valid"]:
+        if result["detail"] == "locked":
+            raise HTTPException(423, detail=f"Terlalu banyak percobaan. Coba lagi dalam {result['remaining']}s")
         raise HTTPException(401, detail="PIN salah atau expired")
 
     if not file.filename.endswith((".xlsx", ".xls")):
@@ -528,7 +547,6 @@ async def upload_and_import(
     except Exception as e:
         raise HTTPException(400, detail=f"File Excel tidak valid: {e}")
 
-    # Store in pending and run import
     session = {
         "file_content": content,
         "filename": file.filename,
