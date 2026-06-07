@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, extract
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.models import SsRecord, EsicTm
@@ -122,6 +122,17 @@ async def get_ss_by_nrp(
     }
 
 
+WITA = timezone(timedelta(hours=8))
+
+def _to_wita(dt):
+    """Convert UTC datetime to WITA for API response."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        # Assume naive = UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(WITA).isoformat()
+
 def _ss_to_dict(r: SsRecord) -> dict:
     return {
         "no_ss": r.no_ss,
@@ -134,7 +145,7 @@ def _ss_to_dict(r: SsRecord) -> dict:
         "source": r.source,
         "grade_ss": r.grade_ss or None,
         "reward_ss": float(r.reward_ss) if r.reward_ss else None,
-        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "created_at": _to_wita(r.created_at),
     }
 
 
@@ -215,7 +226,18 @@ async def get_dept_daily(
     return [{"day": int(row.day), "count": row.count} for row in rows]
 
 
-# ─── PIN ────────────────────────────────────────────────
+# ─── Test ─────────────────────────────────────────────────
 
+
+@router.get("/test-timezone")
+async def test_timezone():
+    """Test timezone — UTC vs WITA display."""
+    now_utc = datetime.now(timezone.utc)
+    now_wita = now_utc.astimezone(WITA)
+    return {
+        "utc": now_utc.isoformat(),
+        "wita": now_wita.isoformat(),
+        "note": "Timestamp di DB disimpan sebagai UTC, response API dikonversi ke WITA (+08:00)",
+    }
 
 
