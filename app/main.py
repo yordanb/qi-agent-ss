@@ -1,9 +1,12 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+"""QI Agent SS — FastAPI application entry point."""
 import logging
 import sys
 import time
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 from app.core.config import settings
 from app.api.v1.router import api_router
 
@@ -23,6 +26,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -31,7 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Request logging middleware
+# Request logging + error handling middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
@@ -57,9 +61,12 @@ async def log_requests(request: Request, call_next):
         )
         return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
-# Use /api prefix
-app.include_router(api_router, prefix="/api")
 
+# Health check
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "version": settings.APP_VERSION}
+
+
+# API v1 routes
+app.include_router(api_router, prefix="/api/v1")
