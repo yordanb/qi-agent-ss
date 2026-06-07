@@ -6,13 +6,13 @@ from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.models import SsRecord, EsicTm
+from app.models import SsRecord, EsicTm, Manpower
 
 router = APIRouter()
 
 async def _get_user_nama(db: AsyncSession, nrp: str) -> str:
     result = await db.execute(
-        select(SsRecord.nama).where(SsRecord.nrp == nrp).limit(1)
+        select(Manpower.nama).where(Manpower.nrp == nrp).limit(1)
     )
     row = result.scalar()
     return row or nrp
@@ -43,7 +43,7 @@ async def _get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int
         "outstanding": max(0, outstanding),
         "wait_approval": wait_approval,
         "other": max(0, other),
-        "last_update": datetime.utcnow().strftime("%Y-%m-%d %H:%M"),
+        "last_update": _to_wita(datetime.now(timezone.utc)),
     }
 
 
