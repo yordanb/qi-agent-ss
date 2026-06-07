@@ -8,7 +8,7 @@ Backend API for the QI Agent Flutter app. JWT-based authentication, PostgreSQL d
 |-------|-----------|
 | Framework | FastAPI |
 | ORM | SQLAlchemy 2.0 (async) |
-| Database | PostgreSQL 15 |
+| Database | PostgreSQL 16 |
 | Auth | JWT (python-jose, bcrypt) |
 | Server | Uvicorn |
 | Container | Docker |
@@ -34,11 +34,9 @@ All protected endpoints require `Authorization: Bearer <token>` header.
   "access_token": "eyJ...",
   "refresh_token": "eyJ...",
   "token_type": "bearer",
-  "user": {
-    "nrp": "61122292",
-    "nama": "YORDAN BANIARA",
-    "is_admin": true
-  }
+  "nrp": "61122292",
+  "nama": "YORDAN BANIARA",
+  "is_admin": true
 }
 ```
 
@@ -51,10 +49,8 @@ All protected endpoints require `Authorization: Bearer <token>` header.
 | `/api/ss/stats/{nrp}` | GET | Dashboard stats for user (total_ss, wait_approval, dept) |
 | `/api/ss/stats/{nrp}/monthly` | GET | Monthly SS breakdown (year+month params) |
 | `/api/ss/by-nrp/{nrp}` | GET | SS records list (paginated: `page`, `page_size`) |
-| `/api/ss/db-stats` | GET | Global stats from DB |
 | `/api/ss/dept/stats/{dept}` | GET | Dept-wide stats (year+month) |
 | `/api/ss/dept/daily/{dept}` | GET | Daily SS count for dept chart (year+month) |
-| `/api/ss/{no_ss}` | GET | Single SS detail |
 
 **SS List Response:**
 ```json
@@ -68,7 +64,8 @@ All protected endpoints require `Authorization: Bearer <token>` header.
       "dept": "SPL2",
       "tanggal_laporan": "2026-05-15",
       "current_status": "approved",
-      "grade_ss": "A"
+      "grade_ss": "A",
+      "created_at": "2026-06-07T11:16:31+08:00"
     }
   ],
   "total": 47,
@@ -76,6 +73,8 @@ All protected endpoints require `Authorization: Bearer <token>` header.
   "page_size": 20
 }
 ```
+
+**Timestamp format:** UTC stored in DB (`timestamptz`), API response auto-converted to WITA (`+08:00`).
 
 ---
 
@@ -85,26 +84,6 @@ All protected endpoints require `Authorization: Bearer <token>` header.
 |----------|--------|-------------|
 | `/api/esic/` | GET | All ESIC snapshots (paginated) |
 | `/api/esic/by-nrp/{nrp}` | GET | ESIC snapshots for user |
-| `/api/esic/compare` | GET | Compare two dates |
-| `/api/esic/documents` | GET | Document list |
-| `/api/esic/progress` | GET | Monthly progress metrics |
-
-**ESIC Response:**
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "nrp": "61122292",
-      "nama": "YORDAN BANIARA",
-      "snapshot_date": "2026-05-01",
-      "dokumen_diakses": "Dokumen KPI,Dokumen Laporan",
-      "dokumen_mtd": "Modul Safety,Modul Quality",
-      "monthly_metrics": "..."
-    }
-  ]
-}
-```
 
 ---
 
@@ -116,41 +95,9 @@ All protected endpoints require `Authorization: Bearer <token>` header.
 | `/api/manpower/single` | POST | Create one record |
 | `/api/manpower/{id}` | PUT | Update record |
 | `/api/manpower/{id}` | DELETE | Delete record |
-| `/api/manpower` | DELETE | Clear all records |
 | `/api/manpower/coverage/summary` | GET | Coverage per crew (year+month) — sorted by % DESC |
 | `/api/manpower/coverage/section` | GET | Coverage per crew in section |
 | `/api/manpower/coverage/nrp/{nrp}` | GET | Individual coverage |
-
-**Coverage Summary Response:**
-```json
-{
-  "year": 2026,
-  "month": 5,
-  "data": [
-    {
-      "crew": "Grader",
-      "total_people": 42,
-      "total_ss": 103,
-      "total_target": 210,
-      "coverage_pct": 49.0
-    }
-  ]
-}
-```
-
-**Create/Update Payload:**
-```json
-{
-  "nrp": "61122292",
-  "nama": "YORDAN BANIARA",
-  "section": "Wheel Maintenance",
-  "crew": "MTE",
-  "posisi": "Engineer",
-  "target_ss": 5,
-  "status": "Aktif",
-  "jabatan": "Staff"
-}
-```
 
 ---
 
@@ -158,61 +105,66 @@ All protected endpoints require `Authorization: Bearer <token>` header.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/upload/pin` | GET | Generate 6-digit PIN, valid 120 seconds |
-| `/api/upload/verify-pin` | POST | Verify PIN (body: `{"pin": "123456"}`) |
+| `/api/upload/pin` | GET | Generate 6-digit PIN, valid 120 seconds (no auth required) |
+| `/api/upload/verify-pin` | GET | Verify PIN — `?pin=123456` (no auth required) |
+| `/api/upload/import` | POST | Upload Excel + import (requires JWT + valid PIN) |
 
----
-
-## Version Check
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/update` | GET | Forced update check |
-
-**Response:**
-```json
-{
-  "min_version": "5.5.0",
-  "latest_version": "5.5.4",
-  "latest_url": "https://github.com/yordanb/qi-agent-ss-app/releases"
-}
-```
+**PIN flow:**
+1. Call `GET /api/upload/pin` → get 6-digit PIN + `remaining_seconds`
+2. Show PIN to user in Flutter app
+3. Call `GET /api/upload/verify-pin?pin=xxxxxx` → `{valid: true/false}`
+4. On success, allow upload via `POST /api/upload/import`
 
 ---
 
 ## Database Schema
 
-PostgreSQL database: `db_qi_agent`
+PostgreSQL database: `db_qi_agent`, host timezone: `Asia/Makassar`
 
 | Schema | Tables |
 |--------|--------|
-| `tb_ss` | `users`, `ss_records`, `import_log`, `manpower`, `refresh_tokens` |
+| `tb_ss` | `users`, `ss_records`, `import_log`, `manpower`, `pin_state` |
 | `tb_esic` | `esic_tm` |
 
 **Key tables:**
-- `tb_ss.users` — NRP (PK), password_hash, is_admin
-- `tb_ss.ss_records` — SS submissions with status/grade
+- `tb_ss.users` — NRP, password_hash, is_admin
+- `tb_ss.ss_records` — SS submissions with status/grade (`timestamptz` for timestamps)
 - `tb_ss.manpower` — staff roster (NRP, crew, target SS)
+- `tb_ss.pin_state` — PIN storage (shared across all uvicorn workers)
 - `tb_esic.esic_tm` — ESIC snapshots with document metrics
 
 ---
 
 ## Deployment
 
-```bash
-# Build
-docker build -t qi-agent-ss-jwt .
+### Using docker-compose (recommended)
 
-# Run
+```bash
+cd qi-agent-ss
+docker compose -f docker-compose.jwt.yml up -d
+```
+
+Config loaded from `.env` file:
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@172.18.0.7:5432/db_qi_agent
+JWT_SECRET_KEY=<generate-with-openssl-rand-base64-32>
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=480
+REFRESH_TOKEN_EXPIRE_DAYS=7
+TZ=Asia/Makassar
+```
+
+### Manual docker run
+
+```bash
 docker run -d \
   --name qi-agent-ss-jwt \
   --network backend-network \
   -p 8001:8000 \
-  -e DATABASE_URL="postgresql+asyncpg://postgres:postgres@172.18.0.5:5432/db_qi_agent" \
-  -e REDIS_URL=redis://172.18.0.6:6379/0 \
-  -e JWT_SECRET_KEY=<your-secret> \
-  qi-agent-ss-jwt \
-  sh -c 'uvicorn app.main:app --host 0.0.0.0 --port 8000'
+  --env-file .env \
+  -e TZ=Asia/Makassar \
+  --restart unless-stopped \
+  qi-agent-ss-jwt:latest
 ```
 
 ---
