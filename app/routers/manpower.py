@@ -7,6 +7,7 @@ from typing import Optional
 from datetime import datetime
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 
 router = APIRouter()
 
@@ -18,6 +19,7 @@ async def get_coverage_by_section(
     year: int = Query(default=datetime.now().year),
     month: int = Query(default=datetime.now().month),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Coverage report per crew dalam satu section."""
     where_section = "AND m.section = :section" if section else ""
@@ -72,6 +74,7 @@ async def get_coverage_by_nrp(
     year: int = Query(default=datetime.now().year),
     month: int = Query(default=datetime.now().month),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Coverage report individual — SS vs target."""
     result = await db.execute(
@@ -122,6 +125,7 @@ async def get_coverage_summary(
     year: int = Query(default=datetime.now().year),
     month: int = Query(default=datetime.now().month),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Ringkasan coverage per crew — untuk dashboard."""
     result = await db.execute(
@@ -168,6 +172,7 @@ async def get_manpower_list(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """List manpower records — filterable by section/crew."""
     conditions = []

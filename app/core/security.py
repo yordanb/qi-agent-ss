@@ -2,7 +2,23 @@ from datetime import datetime, timedelta
 from typing import Optional
 import bcrypt
 from jose import JWTError, jwt
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.core.config import settings
+
+security_scheme = HTTPBearer()
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)) -> dict:
+    """Validate JWT token from Authorization header and return user payload."""
+    token = credentials.credentials
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    nrp = payload.get("sub")
+    if nrp is None:
+        raise HTTPException(status_code=401, detail="Invalid token: missing sub")
+    user = {"nrp": nrp, "is_admin": payload.get("is_admin", False)}
+    return user
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:

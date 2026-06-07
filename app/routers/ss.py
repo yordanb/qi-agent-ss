@@ -5,6 +5,7 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.models import SsRecord, EsicTm
 
 router = APIRouter()
@@ -49,7 +50,7 @@ async def _get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int
 # ─── SS Stats ───────────────────────────────────────────
 
 @router.get("/ss/stats/{nrp}")
-async def get_ss_stats(nrp: str, db: AsyncSession = Depends(get_db)):
+async def get_ss_stats(nrp: str, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     nama = await _get_user_nama(db, nrp)
 
     # Get dept from SS records
@@ -73,6 +74,7 @@ async def get_monthly_stats(
     year: int = Query(default=2026),
     month: int = Query(default=6),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     nama = await _get_user_nama(db, nrp)
     result = await db.execute(
@@ -100,6 +102,7 @@ async def get_ss_by_nrp(
     page_size: int = Query(default=50, ge=1, le=200),
     status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     query = select(SsRecord).where(SsRecord.nrp == nrp)
     if status:
@@ -152,7 +155,7 @@ def _ss_to_dict(r: SsRecord) -> dict:
 # ─── ESIC ───────────────────────────────────────────────
 
 @router.get("/esic/by-nrp/{nrp}")
-async def get_esic_by_nrp(nrp: str, db: AsyncSession = Depends(get_db)):
+async def get_esic_by_nrp(nrp: str, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
     result = await db.execute(
         select(EsicTm).where(EsicTm.nrp == nrp).order_by(EsicTm.snapshot_date.desc())
     )
@@ -186,6 +189,7 @@ async def get_dept_stats(
     year: int = Query(default=2026),
     month: int = Query(default=6),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     query = select(SsRecord).where(
         and_(
@@ -209,6 +213,7 @@ async def get_dept_daily(
     year: int = Query(default=2026),
     month: int = Query(default=6),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     query = select(
         extract("day", SsRecord.tanggal_laporan).label("day"),

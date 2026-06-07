@@ -158,6 +158,7 @@ async def _process_outstanding_records(db: AsyncSession, ws, import_id: int):
 async def import_closed(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Upload Excel file closed SS. Filter: SPL2 + STYR only."""
     if not file.filename.endswith((".xlsx", ".xls")):
@@ -196,6 +197,7 @@ async def import_closed(
 async def import_outstanding(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Upload Excel file outstanding SS. Filter: SPL2 + STYR only."""
     if not file.filename.endswith((".xlsx", ".xls")):

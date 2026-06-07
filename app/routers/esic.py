@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openpyxl import load_workbook
 
 from app.core.database import get_db
+from app.core.security import get_current_user
 from app.utils import clean_text, ALLOWED_DEPT
 
 router = APIRouter(prefix="/esic", tags=["esic"])
@@ -58,6 +59,7 @@ def extract_docs(row) -> set[str]:
 async def import_esic(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Upload Excel ESIC TM. Filter: SPL2 + STYR only."""
     if not file.filename.endswith((".xlsx", ".xls")):
@@ -157,6 +159,7 @@ async def compare_snapshots(
     from_date: date = Query(...),
     to_date: date = Query(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """
     Bandingkan dokumen antara dua snapshot.
@@ -203,6 +206,7 @@ async def get_documents(
     year: int = Query(...),
     month: int = Query(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Semua judul dokumen yang diakses NRP di bulan tertentu."""
     sql = text("""
@@ -242,6 +246,7 @@ async def get_progress(
     from_date: date = Query(...),
     to_date: date = Query(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """
     Cek progres akses dokumen NRP antara dua tanggal.
@@ -288,6 +293,7 @@ async def get_dept_progress(
     year: int = Query(...),
     month: int = Query(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """
     Dashboard progres per departemen di bulan tertentu.
@@ -369,6 +375,7 @@ async def get_dept_progress(
 async def get_esic_by_nrp(
     nrp: str,
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Semua snapshot ESIC untuk satu NRP."""
     sql = text("""

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
 from app.core.database import engine, get_db
+from app.core.security import get_current_user
 
 router = APIRouter(tags=["upload"])
 
@@ -520,6 +521,7 @@ async def upload_and_import(
     import_type: str = Form("closed"),
     pin: str = Form(...),
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """Upload file + import langsung setelah PIN verified."""
     result = await validate_pin_db(pin)
