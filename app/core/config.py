@@ -20,6 +20,6 @@ class Settings(BaseSettings):
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
 
     # CORS
-    CORS_ORIGINS: List[str] = ["*"]
+    CORS_ORIGINS: List[str] = ["https://qi.mibt.my.id"]
 
 settings = Settings()

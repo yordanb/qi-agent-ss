@@ -7,8 +7,11 @@ from datetime import datetime, timezone, timedelta
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models import SsRecord, EsicTm, Manpower, ImportLog
+import logging
 
 router = APIRouter()
+
+logger = logging.getLogger("qi-agent.ss")
 
 async def _get_user_nama(db: AsyncSession, nrp: str) -> str:
     result = await db.execute(
@@ -55,46 +58,54 @@ async def _get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int
 
 @router.get("/ss/stats/{nrp}")
 async def get_ss_stats(nrp: str, db: AsyncSession = Depends(get_db), user: dict = Depends(get_current_user)):
-    nama = await _get_user_nama(db, nrp)
-
-    # Get dept from SS records
-    result = await db.execute(
-        select(SsRecord.dept).where(SsRecord.nrp == nrp).limit(1)
-    )
-    dept = result.scalar() or "-"
-    stats = await _get_ss_stats(db, nrp)
-
-    return {
-        "nrp": nrp,
-        "nama": nama,
-        "dept": dept,
-        **stats,
-    }
+    try:
+        nama = await _get_user_nama(db, nrp)
+        result = await db.execute(
+            select(SsRecord.dept).where(SsRecord.nrp == nrp).limit(1)
+        )
+        dept = result.scalar() or "-"
+        stats = await _get_ss_stats(db, nrp)
+        return {
+            "nrp": nrp,
+            "nama": nama,
+            "dept": dept,
+            **stats,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_ss_stats error for nrp=%s: %s", nrp, str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/ss/stats/{nrp}/monthly")
 async def get_monthly_stats(
     nrp: str,
-    year: int = Query(default=2026),
-    month: int = Query(default=6),
+    year: int = Query(default=2026, ge=2020, le=2030),
+    month: int = Query(default=6, ge=1, le=12),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    nama = await _get_user_nama(db, nrp)
-    result = await db.execute(
-        select(SsRecord.dept).where(SsRecord.nrp == nrp).limit(1)
-    )
-    dept = result.scalar() or "-"
-    stats = await _get_ss_stats(db, nrp, year=year, month=month)
-
-    return {
-        "nrp": nrp,
-        "nama": nama,
-        "dept": dept,
-        "year": year,
-        "month": month,
-        **stats,
-    }
+    try:
+        nama = await _get_user_nama(db, nrp)
+        result = await db.execute(
+            select(SsRecord.dept).where(SsRecord.nrp == nrp).limit(1)
+        )
+        dept = result.scalar() or "-"
+        stats = await _get_ss_stats(db, nrp, year=year, month=month)
+        return {
+            "nrp": nrp,
+            "nama": nama,
+            "dept": dept,
+            "year": year,
+            "month": month,
+            **stats,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_monthly_stats error for nrp=%s: %s", nrp, str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ─── SS List ────────────────────────────────────────────
@@ -108,25 +119,31 @@ async def get_ss_by_nrp(
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    query = select(SsRecord).where(SsRecord.nrp == nrp)
-    if status:
-        query = query.where(SsRecord.current_status.ilike(f"%{status}%"))
+    try:
+        query = select(SsRecord).where(SsRecord.nrp == nrp)
+        if status:
+            query = query.where(SsRecord.current_status.ilike(f"%{status}%"))
 
-    count_result = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = count_result.scalar()
+        count_result = await db.execute(select(func.count()).select_from(query.subquery()))
+        total = count_result.scalar()
 
-    # Order by tanggal_menilai (approve date) DESC, fallback to updated_at
-    from sqlalchemy import desc, nulls_last
-    query = query.order_by(nulls_last(desc(SsRecord.tanggal_laporan)), desc(SsRecord.created_at)).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    records = result.scalars().all()
+        # Order by tanggal_menilai (approve date) DESC, fallback to updated_at
+        from sqlalchemy import desc, nulls_last
+        query = query.order_by(nulls_last(desc(SsRecord.tanggal_laporan)), desc(SsRecord.created_at)).offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(query)
+        records = result.scalars().all()
 
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "data": [_ss_to_dict(r) for r in records],
-    }
+        return {
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "data": [_ss_to_dict(r) for r in records],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("get_ss_by_nrp error for nrp=%s: %s", nrp, str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 WITA = timezone(timedelta(hours=8))
