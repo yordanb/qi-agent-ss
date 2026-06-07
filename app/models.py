@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, Numeric, Date, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import Base
 
 class User(Base):
@@ -68,7 +69,7 @@ class EsicTm(Base):
     snapshot_date = Column(Date, nullable=False)
     dokumen_diakses = Column(Text)
     dokumen_mtd = Column(Text)
-    monthly_metrics = Column(Text)
+    monthly_metrics = Column(JSONB)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -98,3 +99,13 @@ class RefreshToken(Base):
     expires_at = Column(DateTime)
     is_revoked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class PinState(Base):
+    __tablename__ = "pin_state"
+    __table_args__ = {"schema": "tb_ss"}
+
+    id = Column(Integer, primary_key=True, default=1)
+    pin = Column(String(10), nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    fail_count = Column(Integer, default=0)
+    locked_until = Column(DateTime(timezone=True), nullable=True)
