@@ -132,13 +132,18 @@ async def get_ss_by_nrp(
 WITA = timezone(timedelta(hours=8))
 
 def _to_wita(dt):
-    """Convert UTC datetime to WITA for API response."""
+    """Convert UTC datetime to WITA ISO format: 2026-06-07T16:16:31+08:00"""
     if dt is None:
         return None
     if dt.tzinfo is None:
-        # Assume naive = UTC
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(WITA).isoformat()
+    wita = dt.astimezone(WITA)
+    # Force +HH:MM format (Python isoformat may return +HHMM for fixed offsets)
+    base = wita.strftime("%Y-%m-%dT%H:%M:%S")
+    ms = f".{wita.microsecond // 1000:03d}"
+    off = wita.strftime("%z")
+    off_fmt = f"{off[:3]}:{off[3:]}"
+    return f"{base}{ms}{off_fmt}"
 
 def _ss_to_dict(r: SsRecord) -> dict:
     return {
