@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends
 
 from app.core.database import engine, get_db
-from app.core.security import get_current_user
+from app.core.security import get_current_user  # noqa: F401
 
 router = APIRouter(tags=["upload"])
 
@@ -384,7 +384,7 @@ async def upload_page():
 
     async function verifyPin(pin) {
       try {
-        const resp = await fetch('/api/upload/verify-pin?pin=' + pin);
+        const resp = await fetch('/api/v1/upload/verify-pin?pin=' + pin);
         const data = await resp.json();
 
         if (data.valid) {
@@ -444,7 +444,7 @@ async def upload_page():
       formData.append('pin', pin);
 
       try {
-        const resp = await fetch('/api/upload/import', { method: 'POST', body: formData });
+        const resp = await fetch('/api/v1/upload/import', { method: 'POST', body: formData });
         const data = await resp.json();
         document.getElementById('spinner').classList.remove('show');
 
@@ -521,7 +521,6 @@ async def upload_and_import(
     import_type: str = Form("closed"),
     pin: str = Form(...),
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(get_current_user),
 ):
     """Upload file + import langsung setelah PIN verified."""
     result = await validate_pin_db(pin)
