@@ -134,6 +134,13 @@ Base URL: `https://qi.mibt.my.id/api/v1`
 |----------|--------|-------------|
 | `/api/v1/esic/` | GET | All ESIC snapshots (paginated) |
 | `/api/v1/esic/by-nrp/{nrp}` | GET | ESIC snapshots for user |
+| `/api/v1/esic/import` | POST | Upload ESIC TM Excel (JWT auth) |
+| `/api/v1/esic/compare` | GET | Compare two snapshots (nrp, from_date, to_date) |
+| `/api/v1/esic/documents` | GET | Documents accessed by NRP in month |
+| `/api/v1/esic/progress` | GET | Document access progress |
+| `/api/v1/esic/dept-progress` | GET | Department-wide progress |
+
+**ESIC Import:** Upload `.xlsx` with filename containing `YYYYMMDD` or `YYYYMM`. Filters: SPL2 + STYR only. Parses `Kode Dept`, `NRP`, `Nama`, `Divisi`, `Distrik`, `Posisi`, `Dokumen Yang Diakses`, `Dokumen MTD`, and monthly metrics columns.
 
 ### Manpower
 
@@ -153,7 +160,13 @@ Base URL: `https://qi.mibt.my.id/api/v1`
 |----------|--------|-------------|
 | `/api/v1/upload/pin` | GET | Generate 6-digit PIN, valid 120 seconds (no auth) |
 | `/api/v1/upload/verify-pin` | GET | Verify PIN — `?pin=123456` (no auth) |
-| `/api/v1/upload/import` | POST | Upload Excel + import (requires JWT + valid PIN) |
+| `/api/v1/upload/import` | POST | Upload Excel + import (PIN required) |
+| `/api/v1/upload/update` | GET | Web UI for upload (PIN-verified upload page) |
+
+**Supported upload types:**
+- `closed` — SS Approved (default)
+- `outstanding` — SS Pending/Outstanding
+- `esic` — ESIC TM snapshots
 
 **PIN flow:**
 1. `GET /api/v1/upload/pin` → get 6-digit PIN + `remaining_seconds`
@@ -198,11 +211,81 @@ PostgreSQL database: `db_qi_agent`, host timezone: `Asia/Makassar`
 
 ## Deployment
 
+### Prerequisites
+
+1. **VPS with Docker & Docker Compose** installed
+2. **PostgreSQL 16** running on `backend-network` Docker network
+3. **Redis 7** running on `backend-network` Docker network
+
+### Step-by-Step: First Deploy on VPS
+
+#### 1. Clone repo
+```bash
+git clone https://github.com/yordanb/qi-agent-ss.git
+cd qi-agent-ss
+```
+
+#### 2. Create `.env` file
+```bash
+cat > .env << 'EOF'
+DATABASE_URL=postgresql+asyncpg://postgres:<password>@<db-host>:5432/db_qi_agent
+JWT_SECRET_KEY=<generate-32-char-random-string>
+JWT_ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=480
+REFRESH_TOKEN_EXPIRE_DAYS=7
+EOF
+```
+
+Generate random JWT secret:
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+#### 3. Ensure Docker network exists
+```bash
+docker network create backend-network 2>/dev/null || true
+```
+
+#### 4. Ensure PostgreSQL is running
+```bash
+# If using Docker:
+docker run -d --name postgres --network backend-network \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=<password> \
+  -e POSTGRES_DB=db_qi_agent \
+  -v pgdata:/var/lib/postgresql/data \
+  --restart unless-stopped \
+  postgres:16-alpine
+```
+
+#### 5. Build & start
+```bash
+docker compose build --no-cache
+docker compose up -d
+```
+
+#### 6. Run database migrations
+```bash
+docker compose exec api-jwt alembic upgrade head
+```
+
+#### 7. Seed initial data (optional)
+```bash
+# Import manpower + SS records via upload web UI
+# Access: http://<vps-ip>:8001/api/v1/update
+```
+
+#### 8. Verify
+```bash
+curl http://localhost:8001/health
+# → {"status": "ok", "version": "4.1.0"}
+```
+
 ### Using docker-compose
 
 ```bash
 cd qi-agent-ss
-docker compose -f docker-compose.jwt.yml up -d
+docker compose up -d
 ```
 
 Config loaded from `.env` file:

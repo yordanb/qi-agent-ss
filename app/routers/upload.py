@@ -13,6 +13,11 @@ from fastapi import Depends
 
 from app.core.database import engine, get_db
 from app.core.security import get_current_user  # noqa: F401
+from app.utils import clean_text, parse_date, parse_num, ALLOWED_DEPT
+
+import openpyxl
+import json
+import re
 
 router = APIRouter(tags=["upload"])
 
@@ -272,6 +277,7 @@ async def upload_page():
       <div class="type-select">
         <div class="type-btn selected-closed" data-type="closed" onclick="selectType('closed')">✅ Approved</div>
         <div class="type-btn" data-type="outstanding" onclick="selectType('outstanding')">⏳ Outstanding</div>
+        <div class="type-btn" data-type="esic" onclick="selectType('esic')">📄 ESIC TM</div>
       </div>
       <div class="upload-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
         <input type="file" id="fileInput" accept=".xlsx,.xls" onchange="handleFile(this)">
@@ -540,9 +546,10 @@ async def upload_and_import(
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
         ws = wb["Report"] if "Report" in wb.sheetnames else wb.active
-        rows = list(ws.iter_rows(values_only=True))
-        if not rows:
-            raise HTTPException(400, detail="Sheet kosong")
+        if import_type != "esic":
+             rows = list(ws.iter_rows(values_only=True))
+             if not rows:
+                 raise HTTPException(400, detail="Sheet kosong")
     except HTTPException:
         raise
     except Exception as e:
@@ -552,12 +559,17 @@ async def upload_and_import(
         "file_content": content,
         "filename": file.filename,
         "import_type": import_type,
-        "total_rows": len(rows) - 1,
+        "total_rows": 0,
         "status": "approved",
     }
 
     try:
-        result = await run_import(db, session)
+        if import_type == "esic":
+            # ESIC uses its own logic
+            result = await run_import_esic(db, session)
+        else:
+            session["total_rows"] = len(rows) - 1
+            result = await run_import(db, session)
         return {"status": "success", "result": result}
     except Exception as e:
         raise HTTPException(500, detail=f"Import error: {e}")
