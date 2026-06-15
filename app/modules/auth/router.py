@@ -69,6 +69,13 @@ async def change_password_endpoint(
     return await change_password(db, req.nrp, req.old_password, req.new_password)
 
 
+@router.post("/logout")
+async def logout_endpoint(current_user: dict = Depends(get_current_user)):
+    """Logout — client-side only, but endpoint exists for consistency."""
+    logger.info("User %s logged out", current_user.get("sub"))
+    return {"detail": "Logged out"}
+
+
 @router.post("/admin/reset-password")
 async def admin_reset_password(
     req: AdminResetPasswordRequest,
