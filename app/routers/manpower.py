@@ -285,11 +285,17 @@ async def update_manpower(id: int, data: dict, db: AsyncSession = Depends(get_db
     """Update satu record manpower berdasarkan ID."""
     fields = []
     params = {"id": id}
-    for key in ("nrp", "nama", "section", "crew", "posisi", "target_ss", "status", "jabatan"):
+    for key in ("nrp", "nama", "section", "crew", "posisi", "target_ss", "status", "jabatan", "is_active"):
         if key in data:
             fields.append(f"{key} = :{key}")
             params[key] = data[key]
 
+    # Sync is_active based on status automatically
+    if "status" in data:
+        new_is_active = (data["status"] == "Aktif")
+        fields.append("is_active = :is_active")
+        params["is_active"] = new_is_active
+    
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -314,46 +320,24 @@ async def update_manpower(id: int, data: dict, db: AsyncSession = Depends(get_db
         "target_ss": row["target_ss"],
         "status": row["status"],
         "jabatan": row["jabatan"],
+        "is_active": row["is_active"],
     }
 
 
-@router.post("/manpower/single")
-async def create_single_manpower(data: dict, db: AsyncSession = Depends(get_db)):
-    """Tambah satu record manpower."""
-    nrp = data.get("nrp")
-    if not nrp:
-        raise HTTPException(status_code=400, detail="NRP wajib diisi")
-
+@router.patch("/manpower/{nrp}/status")
+async def update_manpower_status(nrp: str, data: dict, db: AsyncSession = Depends(get_db)):
+    """Update status aktif manpower berdasarkan NRP."""
+    is_active = data.get("is_active")
+    if is_active is None:
+        raise HTTPException(status_code=400, detail="is_active wajib diisi")
+    
     result = await db.execute(
-        text("""
-            INSERT INTO tb_ss.manpower (nrp, nama, section, crew, posisi, target_ss, status, jabatan)
-            VALUES (:nrp, :nama, :section, :crew, :posisi, :target_ss, :status, :jabatan)
-            RETURNING id
-        """),
-        {
-            "nrp": nrp,
-            "nama": data.get("nama", ""),
-            "section": data.get("section", ""),
-            "crew": data.get("crew", ""),
-            "posisi": data.get("posisi", ""),
-            "target_ss": data.get("target_ss", 2),
-            "status": data.get("status", "Aktif"),
-            "jabatan": data.get("jabatan", ""),
-        },
+        text("UPDATE tb_ss.manpower SET is_active = :is_active WHERE nrp = :nrp"),
+        {"is_active": is_active, "nrp": nrp},
     )
-    new_id = result.scalar()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="NRP tidak ditemukan")
+    
     await db.commit()
+    return {"message": "Status updated"}
 
-    res = await db.execute(text("SELECT * FROM tb_ss.manpower WHERE id = :id"), {"id": new_id})
-    row = res.mappings().first()
-    return {
-        "id": row["id"],
-        "nrp": row["nrp"],
-        "nama": row["nama"],
-        "section": row["section"],
-        "crew": row["crew"],
-        "posisi": row["posisi"],
-        "target_ss": row["target_ss"],
-        "status": row["status"],
-        "jabatan": row["jabatan"],
-    }
