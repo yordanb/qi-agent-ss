@@ -39,9 +39,12 @@ async def _get_ss_stats(db: AsyncSession, nrp: str, year: int = None, month: int
     last_imported_at = imp_res.scalar()
 
     total = len(records)
-    closed = sum(1 for r in records if r.current_status and r.current_status.lower() in ("approved", "closed"))
-    outstanding = sum(1 for r in records if r.current_status and "outstanding" in r.current_status.lower())
+    closed = sum(1 for r in records if r.source and r.source.lower() == "closed")
+    outstanding = sum(1 for r in records if r.source and r.source.lower() == "outstanding")
     wait_approval = sum(1 for r in records if r.current_status and "wait" in r.current_status.lower())
+    
+    # Calculate Other: status not closed/outstanding AND not waiting
+    # Adjust logic if 'other' has specific definition in your business process
     other = total - closed - outstanding - wait_approval
 
     return {
@@ -81,8 +84,8 @@ async def get_ss_stats(nrp: str, db: AsyncSession = Depends(get_db), user: dict 
 @router.get("/ss/stats/{nrp}/monthly")
 async def get_monthly_stats(
     nrp: str,
-    year: int = Query(default=2026, ge=2020, le=2030),
-    month: int = Query(default=6, ge=1, le=12),
+    year: int = Query(default=datetime.now().year, ge=2020, le=2030),
+    month: int = Query(default=datetime.now().month, ge=1, le=12),
     db: AsyncSession = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
@@ -227,8 +230,8 @@ async def get_dept_stats(
     result = await db.execute(query)
     records = result.scalars().all()
 
-    approved = sum(1 for r in records if r.current_status and r.current_status.lower() in ("approved", "closed"))
-    waiting = sum(1 for r in records if r.current_status and "wait" in r.current_status.lower())
+    approved = sum(1 for r in records if r.source and r.source.lower() == "closed")
+    waiting = sum(1 for r in records if r.source and r.source.lower() == "outstanding")
 
     return {"dept": dept, "year": year, "month": month, "approved": approved, "waiting": waiting, "total": len(records)}
 

@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.ss_repo import (
-    get_ss_stats, get_ss_list, get_dept_stats, get_dept_daily, get_last_import_time,
+    get_ss_stats, get_ss_list, get_dept_stats, get_dept_daily, get_last_import_time, get_eiictm_stats,
 )
 from app.models import SsRecord
 
@@ -65,6 +65,9 @@ async def get_dept_stats_response(db: AsyncSession, dept: str, year: int = None,
 
 async def get_dept_daily_response(db: AsyncSession, dept: str, year: int, month: int) -> dict:
     return await get_dept_daily(db, dept, year=year, month=month)
+
+async def get_eiictm_response(db: AsyncSession, dept: str, year: int = None, month: int = None) -> dict:
+    return await get_eiictm_stats(db, dept, year=year, month=month)
 
 
 def _ss_to_dict(r: SsRecord) -> dict:

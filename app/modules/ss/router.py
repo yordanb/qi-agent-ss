@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.services.ss_service import (
     get_stats_response, get_monthly_response, get_list_response,
-    get_dept_stats_response, get_dept_daily_response,
+    get_dept_stats_response, get_dept_daily_response, get_eiictm_response,
 )
 
 logger = logging.getLogger("qi-agent.ss")
@@ -95,6 +95,20 @@ async def get_dept_stats(
         logger.error("get_dept_stats error: %s", str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+@router.get("/dept/eiictm/{dept}")
+async def get_eiictm_stats(
+    dept: str,
+    year: int = Query(default=None, ge=2020, le=2030),
+    month: int = Query(default=None, ge=1, le=12),
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    try:
+        return await get_eiictm_response(db, dept, year=year, month=month)
+    except Exception as e:
+        logger.error("get_eiictm_stats error: %s", str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/dept/daily/{dept}")
 async def get_dept_daily(
