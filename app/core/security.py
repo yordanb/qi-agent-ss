@@ -17,7 +17,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     nrp = payload.get("sub")
     if nrp is None:
         raise HTTPException(status_code=401, detail="Invalid token: missing sub")
-    user = {"nrp": nrp, "is_admin": payload.get("is_admin", False)}
+    user = {"nrp": nrp, "role": payload.get("role", "user")}
     return user
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

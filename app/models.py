@@ -10,7 +10,8 @@ class User(Base):
 
     nrp = Column(String(20), primary_key=True)
     password_hash = Column(Text, nullable=False)
-    is_admin = Column(Boolean, default=False)
+    role = Column(String(20), default="user", nullable=False)  # 'admin' or 'user'
+    is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

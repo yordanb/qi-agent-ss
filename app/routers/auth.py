@@ -1,6 +1,5 @@
 """Authentication endpoints with JWT."""
 
-from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -19,9 +18,7 @@ class LoginResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-    nrp: str
-    nama: str
-    is_admin: bool = False
+    user: dict  # {nrp, nama, role}
 
 class ChangePasswordRequest(BaseModel):
     nrp: str
@@ -37,44 +34,20 @@ class AdminResetRequest(BaseModel):
 @router.post("/login", response_model=LoginResponse)
 async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Login with NRP + password → returns JWT tokens."""
+    # Strict check: User must exist in users table
     res = await db.execute(
-        text("SELECT nrp, password_hash, is_admin FROM tb_ss.users WHERE nrp = :nrp"),
+        text("SELECT nrp, password_hash, role, is_active FROM tb_ss.users WHERE nrp = :nrp"),
         {"nrp": req.nrp},
     )
     user = res.mappings().first()
 
     if not user:
-        # Auto-create user if NRP exists in manpower
-        mp_res = await db.execute(
-            text("SELECT nrp, nama FROM tb_ss.manpower WHERE nrp = :nrp LIMIT 1"),
-            {"nrp": req.nrp},
-        )
-        mp_user = mp_res.mappings().first()
-        if not mp_user:
-            raise HTTPException(status_code=404, detail="NRP tidak ditemukan")
+        raise HTTPException(status_code=401, detail="NRP tidak terdaftar")
 
-        default_hash = get_password_hash("12345")
-        await db.execute(
-            text("INSERT INTO tb_ss.users (nrp, password_hash) VALUES (:nrp, :hash)"),
-            {"nrp": req.nrp, "hash": default_hash},
-        )
-        await db.commit()
+    if not user["is_active"]:
+        raise HTTPException(status_code=403, detail="Akun dinonaktifkan")
 
-        if not verify_password(req.password, default_hash):
-            raise HTTPException(status_code=401, detail="Password salah. Default password: 12345")
-
-        nama = mp_user["nama"] or req.nrp
-        access_token = create_access_token({"sub": req.nrp, "is_admin": False})
-        refresh_token = create_refresh_token({"sub": req.nrp})
-        return LoginResponse(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            nrp=req.nrp,
-            nama=nama,
-            is_admin=False,
-        )
-
-    # Verify password for existing user
+    # Verify password
     if not verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Password salah")
 
@@ -85,16 +58,14 @@ async def login(req: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
     mp_user = mp_res.mappings().first()
     nama = mp_user["nama"] if mp_user else req.nrp
-    is_admin = user["is_admin"] or False
 
-    access_token = create_access_token({"sub": req.nrp, "is_admin": is_admin})
+    access_token = create_access_token({"sub": req.nrp, "role": user["role"]})
     refresh_token = create_refresh_token({"sub": req.nrp})
+    
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        nrp=req.nrp,
-        nama=nama,
-        is_admin=is_admin,
+        user={"nrp": req.nrp, "nama": nama, "role": user["role"]}
     )
 
 @router.post("/refresh")
@@ -105,8 +76,8 @@ async def refresh_token(token: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
     nrp = payload.get("sub")
-    is_admin = payload.get("is_admin", False)
-    new_access = create_access_token({"sub": nrp, "is_admin": is_admin})
+    role = payload.get("role", "user")
+    new_access = create_access_token({"sub": nrp, "role": role})
     new_refresh = create_refresh_token({"sub": nrp})
     return {"access_token": new_access, "refresh_token": new_refresh, "token_type": "bearer"}
 
@@ -136,11 +107,11 @@ async def change_password(req: ChangePasswordRequest, db: AsyncSession = Depends
 async def admin_reset_password(req: AdminResetRequest, db: AsyncSession = Depends(get_db)):
     """Admin reset password user lain."""
     admin_res = await db.execute(
-        text("SELECT password_hash, is_admin FROM tb_ss.users WHERE nrp = :nrp"),
+        text("SELECT password_hash, role FROM tb_ss.users WHERE nrp = :nrp"),
         {"nrp": req.admin_nrp},
     )
     admin = admin_res.mappings().first()
-    if not admin or not admin["is_admin"]:
+    if not admin or admin["role"] != "admin":
         raise HTTPException(status_code=403, detail="Hanya admin yang bisa reset password")
 
     if not verify_password(req.admin_password, admin["password_hash"]):
