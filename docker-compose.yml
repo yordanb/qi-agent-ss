@@ -1,5 +1,8 @@
 services:
   api-jwt:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: qi-agent-ss-jwt:latest
     container_name: qi-agent-ss-jwt
     ports:
