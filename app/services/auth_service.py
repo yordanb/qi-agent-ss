@@ -45,5 +45,5 @@ async def create_new_user(db: AsyncSession, nrp: str, password: str, role: str =
 
 
 async def list_users(db: AsyncSession) -> list[dict]:
-    users = await get_all_users()
+    users = await get_all_users(db)
     return [{"nrp": u.nrp, "role": u.role, "is_active": u.is_active} for u in users]
