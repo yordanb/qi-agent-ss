@@ -39,12 +39,6 @@ async def get_stats_response(db: AsyncSession, nrp: str) -> dict:
     last_import = await get_last_import_time(db)
     return {"nrp": nrp, "nama": nama, "dept": dept, **stats, "last_update": last_import}
 
-async def get_monthly_response(db: AsyncSession, nrp: str, year: int, month: int) -> dict:
-    stats = await get_ss_stats(db, nrp, year=year, month=month)
-    nama = await _get_user_nama(db, nrp)
-    dept = await _get_user_dept(db, nrp)
-    return {"nrp": nrp, "nama": nama, "dept": dept, "year": year, "month": month, **stats}
-
 
 async def get_monthly_response(db: AsyncSession, nrp: str, year: int, month: int) -> dict:
     stats = await get_ss_stats(db, nrp, year=year, month=month)
@@ -65,6 +59,7 @@ async def get_dept_stats_response(db: AsyncSession, dept: str, year: int = None,
 
 async def get_dept_daily_response(db: AsyncSession, dept: str, year: int, month: int) -> dict:
     return await get_dept_daily(db, dept, year=year, month=month)
+
 
 async def get_eiictm_response(db: AsyncSession, dept: str, year: int = None, month: int = None) -> dict:
     return await get_eiictm_stats(db, dept, year=year, month=month)

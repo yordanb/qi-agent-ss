@@ -6,7 +6,5 @@ alembic
 python-jose[cryptography]
 bcrypt
 pydantic-settings
-redis
-httpx
 python-multipart
 openpyxl

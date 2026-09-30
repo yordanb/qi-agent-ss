@@ -227,11 +227,20 @@ async def get_manpower_list(
     }
 
 
-# ─── Manpower CRUD ──────────────────────────────────────
+# ─── Manpower CRUD (Admin Only) ─────────────────────────
+
+ALLOWED_MANPOWER_FIELDS = {"nrp", "nama", "section", "crew", "posisi", "target_ss", "status", "jabatan"}
+
 
 @router.post("/manpower")
-async def create_manpower(data: dict, db: AsyncSession = Depends(get_db)):
-    """Bulk insert manpower records."""
+async def create_manpower(
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Bulk insert manpower records (admin only)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Hanya admin")
     records = data.get("records", [])
     if not records:
         raise HTTPException(status_code=400, detail="No records provided")
@@ -264,15 +273,27 @@ async def create_manpower(data: dict, db: AsyncSession = Depends(get_db)):
 
 
 @router.delete("/manpower")
-async def clear_manpower(db: AsyncSession = Depends(get_db)):
-    """Clear all manpower data (for re-import)."""
+async def clear_manpower(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear all manpower data (admin only)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Hanya admin")
     await db.execute(text("DELETE FROM tb_ss.manpower"))
     await db.commit()
     return {"message": "All manpower records deleted"}
 
+
 @router.delete("/manpower/{id}")
-async def delete_manpower(id: int, db: AsyncSession = Depends(get_db)):
-    """Hapus satu record manpower berdasarkan ID."""
+async def delete_manpower(
+    id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Hapus satu record manpower berdasarkan ID (admin only)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Hanya admin")
     result = await db.execute(text("DELETE FROM tb_ss.manpower WHERE id = :id"), {"id": id})
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="ID tidak ditemukan")
@@ -281,11 +302,18 @@ async def delete_manpower(id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/manpower/{id}")
-async def update_manpower(id: int, data: dict, db: AsyncSession = Depends(get_db)):
-    """Update satu record manpower berdasarkan ID."""
+async def update_manpower(
+    id: int,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Update satu record manpower berdasarkan ID (admin only)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Hanya admin")
     fields = []
     params = {"id": id}
-    for key in ("nrp", "nama", "section", "crew", "posisi", "target_ss", "status", "jabatan", "is_active"):
+    for key in ALLOWED_MANPOWER_FIELDS:
         if key in data:
             fields.append(f"{key} = :{key}")
             params[key] = data[key]
@@ -295,7 +323,7 @@ async def update_manpower(id: int, data: dict, db: AsyncSession = Depends(get_db
         new_is_active = (data["status"] == "Aktif")
         fields.append("is_active = :is_active")
         params["is_active"] = new_is_active
-    
+
     if not fields:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -325,19 +353,25 @@ async def update_manpower(id: int, data: dict, db: AsyncSession = Depends(get_db
 
 
 @router.patch("/manpower/{nrp}/status")
-async def update_manpower_status(nrp: str, data: dict, db: AsyncSession = Depends(get_db)):
-    """Update status aktif manpower berdasarkan NRP."""
+async def update_manpower_status(
+    nrp: str,
+    data: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Update status aktif manpower berdasarkan NRP (admin only)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Hanya admin")
     is_active = data.get("is_active")
     if is_active is None:
         raise HTTPException(status_code=400, detail="is_active wajib diisi")
-    
+
     result = await db.execute(
         text("UPDATE tb_ss.manpower SET is_active = :is_active WHERE nrp = :nrp"),
         {"is_active": is_active, "nrp": nrp},
     )
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="NRP tidak ditemukan")
-    
+
     await db.commit()
     return {"message": "Status updated"}
-

@@ -8,17 +8,21 @@ from app.core.config import settings
 
 security_scheme = HTTPBearer()
 
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security_scheme)) -> dict:
     """Validate JWT token from Authorization header and return user payload."""
     token = credentials.credentials
     payload = decode_token(token)
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid token type")
     nrp = payload.get("sub")
     if nrp is None:
         raise HTTPException(status_code=401, detail="Invalid token: missing sub")
     user = {"nrp": nrp, "role": payload.get("role", "user")}
     return user
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
@@ -29,11 +33,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     except Exception:
         return False
 
+
 def get_password_hash(password: str) -> str:
     return bcrypt.hashpw(
         password.encode("utf-8"),
         bcrypt.gensalt(),
     ).decode("utf-8")
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -41,11 +47,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
+
 def create_refresh_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     to_encode.update({"exp": expire, "type": "refresh"})
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
 
 def decode_token(token: str) -> Optional[dict]:
     try:
